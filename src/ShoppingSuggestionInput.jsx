@@ -1,11 +1,13 @@
 import React, { useState, useEffect } from 'react';
-import { TextField, List, ListItem, ListItemButton, ListItemText, Paper } from '@mui/material';
-import axios from 'axios';
+import { TextField, List, ListItem, ListItemButton, ListItemText, Paper, Typography } from '@mui/material';
+import { getSuggestions } from './api';
+import { useTheme } from './ThemeContext';
 
 export default function ShoppingSuggestionInput({ label, value, onChange, ...props }) {
   const [input, setInput] = useState(value || '');
   const [suggestions, setSuggestions] = useState([]);
   const [open, setOpen] = useState(false);
+  const { colors } = useTheme();
 
   useEffect(() => {
     setInput(value || '');
@@ -13,9 +15,9 @@ export default function ShoppingSuggestionInput({ label, value, onChange, ...pro
 
   useEffect(() => {
     if (input.length > 0) {
-      // Use new AI shopping suggestions endpoint
-      axios.post('https://grocygo.onrender.com/api/ai/shopping-suggestions', { inventory: [input] })
-        .then(res => setSuggestions(res.data));
+      getSuggestions(input)
+        .then(res => setSuggestions(res.data || []))
+        .catch(() => setSuggestions([]));
       setOpen(true);
     } else {
       setSuggestions([]);
@@ -30,7 +32,7 @@ export default function ShoppingSuggestionInput({ label, value, onChange, ...pro
   };
 
   return (
-    <div style={{ position: 'relative' }}>
+    <div style={{ position: 'relative', width: '100%' }}>
       <TextField
         label={label}
         value={input}
@@ -43,12 +45,47 @@ export default function ShoppingSuggestionInput({ label, value, onChange, ...pro
         {...props}
       />
       {open && suggestions.length > 0 && (
-        <Paper style={{ position: 'absolute', zIndex: 10, left: 0, right: 0, maxHeight: 200, overflowY: 'auto' }}>
-          <List>
+        <Paper
+          elevation={8}
+          sx={{
+            position: 'absolute',
+            zIndex: 1400,
+            left: 0,
+            right: 0,
+            marginTop: '4px',
+            maxHeight: 220,
+            overflowY: 'auto',
+            bgcolor: colors.paper,
+            borderRadius: '12px',
+            border: `1px solid ${colors.border}`,
+            boxShadow: colors.cardShadow,
+          }}
+        >
+          <List disablePadding>
             {suggestions.map((s, i) => (
               <ListItem disablePadding key={i}>
-                <ListItemButton onClick={() => handleSelect(s)}>
-                  <ListItemText primary={s.product} secondary={s.category} />
+                <ListItemButton
+                  onClick={() => handleSelect(s)}
+                  sx={{
+                    py: 1,
+                    px: 2,
+                    '&:hover': { bgcolor: colors.hover },
+                  }}
+                >
+                  <ListItemText
+                    primary={
+                      <Typography variant="body2" sx={{ fontWeight: 600, color: colors.text }}>
+                        {s.product}
+                      </Typography>
+                    }
+                    secondary={
+                      s.category && (
+                        <Typography variant="caption" sx={{ color: colors.primary, fontWeight: 500 }}>
+                          {s.category}
+                        </Typography>
+                      )
+                    }
+                  />
                 </ListItemButton>
               </ListItem>
             ))}

@@ -1,4 +1,6 @@
 // Script to validate environment variables before build
+require('dotenv').config();
+
 const requiredEnvVars = [
   'REACT_APP_FIREBASE_API_KEY',
   'REACT_APP_FIREBASE_AUTH_DOMAIN',

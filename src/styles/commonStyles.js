@@ -1,79 +1,132 @@
-export const getCommonStyles = (theme) => ({
-  pageContainer: {
-    minHeight: '100vh',
-    backgroundColor: theme.colors.background,
-    padding: '2rem',
-  },
-  paper: {
-    backgroundColor: theme.colors.paper,
-    color: theme.colors.text,
-    borderRadius: '8px',
-    boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
-  },
-  card: {
-    backgroundColor: theme.colors.cardBg,
-    color: theme.colors.text,
-    borderRadius: '8px',
-    border: `1px solid ${theme.colors.border}`,
-  },
-  title: {
-    color: theme.colors.text,
-    fontWeight: 700,
-  },
-  subtitle: {
-    color: theme.colors.textSecondary,
-    fontWeight: 400,
-  },
-  button: {
-    backgroundColor: theme.colors.primary,
-    color: theme.colors.text,
-    '&:hover': {
-      backgroundColor: theme.colors.hover,
+export const getCommonStyles = (theme) => {
+  const c = theme?.colors || theme || {};
+  return {
+    pageContainer: {
+      minHeight: '100vh',
+      backgroundColor: c.background || '#0B0F17',
+      padding: { xs: '1rem', md: '2rem' },
     },
-  },
-  input: {
-    backgroundColor: theme.colors.paper,
-    color: theme.colors.text,
-    '& .MuiOutlinedInput-notchedOutline': {
-      borderColor: theme.colors.border,
+    glassPaper: {
+      backgroundColor: c.glassBg || 'rgba(17, 25, 39, 0.75)',
+      backdropFilter: c.glassBlur || 'blur(16px)',
+      color: c.text || '#F8FAFC',
+      borderRadius: '16px',
+      border: c.glassBorder || '1px solid rgba(255, 255, 255, 0.1)',
+      boxShadow: c.cardShadow || '0 10px 30px -5px rgba(0,0,0,0.5)',
+      transition: 'all 0.25s cubic-bezier(0.16, 1, 0.3, 1)',
     },
-    '&:hover .MuiOutlinedInput-notchedOutline': {
-      borderColor: theme.colors.primary,
+    paper: {
+      backgroundColor: c.paper || '#111927',
+      color: c.text || '#F8FAFC',
+      borderRadius: '16px',
+      border: `1px solid ${c.border || 'rgba(255, 255, 255, 0.1)'}`,
+      boxShadow: c.cardShadow || '0 10px 30px -5px rgba(0,0,0,0.5)',
     },
-    '&.Mui-focused .MuiOutlinedInput-notchedOutline': {
-      borderColor: theme.colors.primary,
+    card: {
+      backgroundColor: c.cardBg || '#152032',
+      color: c.text || '#F8FAFC',
+      borderRadius: '16px',
+      border: `1px solid ${c.border || 'rgba(255, 255, 255, 0.1)'}`,
+      boxShadow: c.cardShadow || '0 10px 30px -5px rgba(0,0,0,0.5)',
+      transition: 'all 0.25s cubic-bezier(0.16, 1, 0.3, 1)',
+      '&:hover': {
+        transform: 'translateY(-3px)',
+        boxShadow: c.cardShadowHover,
+      },
     },
-  },
-  table: {
-    '& .MuiTableCell-head': {
-      backgroundColor: theme.colors.cardBg,
-      color: theme.colors.text,
+    title: {
+      color: c.text || '#F8FAFC',
+      fontWeight: 700,
+      fontFamily: "'Plus Jakarta Sans', sans-serif",
+      letterSpacing: '-0.02em',
+    },
+    subtitle: {
+      color: c.textSecondary || '#94A3B8',
+      fontWeight: 400,
+      fontSize: '0.95rem',
+    },
+    gradientButton: {
+      background: c.gradientPrimary || 'linear-gradient(135deg, #10B981 0%, #059669 100%)',
+      color: '#FFFFFF',
       fontWeight: 600,
+      borderRadius: '10px',
+      padding: '8px 20px',
+      transition: 'all 0.2s cubic-bezier(0.16, 1, 0.3, 1)',
+      '&:hover': {
+        background: 'linear-gradient(135deg, #059669 0%, #047857 100%)',
+        boxShadow: '0 4px 15px rgba(16, 185, 129, 0.35)',
+        transform: 'translateY(-1px)',
+      },
     },
-    '& .MuiTableCell-body': {
-      color: theme.colors.text,
-      borderBottom: `1px solid ${theme.colors.border}`,
+    outlinedButton: {
+      color: c.text || '#F8FAFC',
+      borderColor: c.border || 'rgba(255, 255, 255, 0.12)',
+      borderRadius: '10px',
+      padding: '8px 18px',
+      fontWeight: 600,
+      transition: 'all 0.2s ease',
+      '&:hover': {
+        borderColor: c.primary || '#10B981',
+        backgroundColor: c.hover || 'rgba(255, 255, 255, 0.05)',
+        transform: 'translateY(-1px)',
+      },
     },
-    '& .MuiTableRow-root:hover': {
-      backgroundColor: theme.colors.hover,
+    input: {
+      backgroundColor: c.paper || '#111927',
+      color: c.text || '#F8FAFC',
+      '& .MuiOutlinedInput-notchedOutline': {
+        borderColor: c.border || 'rgba(255, 255, 255, 0.12)',
+        borderRadius: '10px',
+      },
+      '&:hover .MuiOutlinedInput-notchedOutline': {
+        borderColor: c.primary || '#10B981',
+      },
+      '&.Mui-focused .MuiOutlinedInput-notchedOutline': {
+        borderColor: c.primary || '#10B981',
+      },
     },
-  },
-  chart: {
-    backgroundColor: theme.colors.cardBg,
-    '& .recharts-cartesian-grid-horizontal line, & .recharts-cartesian-grid-vertical line': {
-      stroke: theme.colors.chartGrid,
+    table: {
+      '& .MuiTableCell-head': {
+        backgroundColor: c.surfaceElevated || '#1E293B',
+        color: c.text || '#F8FAFC',
+        fontWeight: 600,
+        fontFamily: "'Plus Jakarta Sans', sans-serif",
+        borderBottom: `1px solid ${c.border || 'rgba(255, 255, 255, 0.12)'}`,
+      },
+      '& .MuiTableCell-body': {
+        color: c.text || '#F8FAFC',
+        borderBottom: `1px solid ${c.divider || 'rgba(255, 255, 255, 0.08)'}`,
+      },
+      '& .MuiTableRow-root': {
+        transition: 'background-color 0.2s ease',
+      },
+      '& .MuiTableRow-root:hover': {
+        backgroundColor: c.hover || 'rgba(255, 255, 255, 0.05)',
+      },
     },
-    '& .recharts-text': {
-      fill: theme.colors.chartText,
+    chart: {
+      backgroundColor: c.cardBg || '#152032',
+      borderRadius: '16px',
+      padding: '16px',
+      '& .recharts-cartesian-grid-horizontal line, & .recharts-cartesian-grid-vertical line': {
+        stroke: c.chartGrid || 'rgba(255, 255, 255, 0.07)',
+      },
+      '& .recharts-text': {
+        fill: c.chartText || '#94A3B8',
+        fontSize: '12px',
+      },
     },
-  },
-  dialog: {
-    '& .MuiDialog-paper': {
-      backgroundColor: theme.colors.paper,
-      color: theme.colors.text,
+    dialog: {
+      '& .MuiDialog-paper': {
+        backgroundColor: c.paper || '#111927',
+        color: c.text || '#F8FAFC',
+        borderRadius: '20px',
+        border: `1px solid ${c.border || 'rgba(255, 255, 255, 0.12)'}`,
+        boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.6)',
+      },
     },
-  },
-  divider: {
-    backgroundColor: theme.colors.divider,
-  },
-});
+    divider: {
+      backgroundColor: c.divider || 'rgba(255, 255, 255, 0.08)',
+    },
+  };
+};

@@ -1,62 +1,91 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { getMealPlans, addMealPlan, deleteMealPlan, getRecipes, fetchWeeklyMealPlans, getMealSuggestions } from './api';
+import { useNavigate } from 'react-router-dom';
+import {
+  Typography, Grid, Box, Button, IconButton, Paper, Card,
+  CardContent, Chip, Tooltip, Stack, FormControl, InputLabel,
+  Select, MenuItem, CircularProgress, Divider, Avatar
+  , Snackbar
+} from '@mui/material';
+import CalendarMonthIcon from '@mui/icons-material/CalendarMonthOutlined';
+import ChevronLeftIcon from '@mui/icons-material/ChevronLeft';
+import ChevronRightIcon from '@mui/icons-material/ChevronRight';
+import AddIcon from '@mui/icons-material/Add';
+import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
+import CheckCircleIcon from '@mui/icons-material/CheckCircle';
+import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
+import RefreshIcon from '@mui/icons-material/Refresh';
+import AccessTimeIcon from '@mui/icons-material/AccessTime';
+import RestaurantIcon from '@mui/icons-material/Restaurant';
+import HistoryIcon from '@mui/icons-material/History';
+
 import AddMealDialog from './AddMealDialog';
 import IngredientUsageDialog from './IngredientUsageDialog';
-import { auth } from './firebase';
-import { signInWithEmailAndPassword, signOut } from 'firebase/auth';
-import { useTheme } from './ThemeContext'; // <-- Add this line
-
 import CompleteMealDialog from './CompleteMealDialog';
+import AIRecipeDetailsDialog from './AIRecipeDetailsDialog';
+import { getMealPlans, getMealHistory, addMealPlan, deleteMealPlan, getRecipes, fetchWeeklyMealPlans, getMealSuggestions, getInventory } from './api';
+import { auth } from './firebase';
+import { useTheme } from './ThemeContext';
+import { fireConfetti } from './utils/confetti';
 
-
-
-
-const daysOfWeek = [
-  'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'
+const daysOfWeek = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+const mealSlots = [
+  { name: 'Breakfast', icon: '🍳', defaultTime: '8:00 AM' },
+  { name: 'Lunch', icon: '🥗', defaultTime: '12:30 PM' },
+  { name: 'Dinner', icon: '🍲', defaultTime: '7:30 PM' },
 ];
-const mealSlots = ['Breakfast', 'Lunch', 'Dinner'];
 
-// Module-level cache for meal plans (persists while app is loaded)
+const DIET_OPTIONS = [
+  'All Diets', 'Vegetarian', 'High Protein Vegetarian', 'Non Vegeterian',
+  'No Onion No Garlic (Sattvic)', 'High Protein Non Vegetarian', 'Diabetic Friendly',
+  'Eggetarian', 'Vegan', 'Gluten Free', 'Sugar Free Diet'
+];
+
 let mealPlansCache = null;
 const MEAL_PLANS_LS_KEY = 'mealPlansCache';
 const AI_SUGGEST_LS_KEY = 'aiMealSuggestCache';
 
+const formatLocalDate = (date) => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
 
 export default function MealPlansPage() {
-  // State declarations must come first!
-  const [aiDialogOpen, setAIDialogOpen] = useState(false);
-  const [selectedAISuggestion, setSelectedAISuggestion] = useState(null);
+  const { colors, isDarkMode } = useTheme();
+  const navigate = useNavigate();
+  const [user, setUser] = useState(auth.currentUser);
   const [plans, setPlans] = useState({});
-  const [user, setUser] = useState(null);
-  const [suggestions, setSuggestions] = useState([]);
   const [recipes, setRecipes] = useState([]);
+  const [inventoryItems, setInventoryItems] = useState([]);
+  const [mealHistory, setMealHistory] = useState([]);
+  const [suggestions, setSuggestions] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [aiLoading, setAiLoading] = useState(false);
+  
+  // Dialogs
   const [dialogOpen, setDialogOpen] = useState(false);
   const [dialogDay, setDialogDay] = useState('');
   const [dialogMealType, setDialogMealType] = useState('');
-  const [dialogDate, setDialogDate] = useState(null); // New state for date in dialog
+  const [dialogDate, setDialogDate] = useState(null);
   const [completeDialog, setCompleteDialog] = useState({ open: false, plan: null });
   const [ingredientDialog, setIngredientDialog] = useState({ open: false, plan: null, ingredients: [] });
-  const [completedMeals, setCompletedMeals] = useState({}); // { planId: true }
-  // Persist selectedDiet in localStorage, restore on mount
+  const [selectedAISuggestion, setSelectedAISuggestion] = useState(null);
+  const [completedMeals, setCompletedMeals] = useState({});
   const [selectedDiet, setSelectedDiet] = useState(() => localStorage.getItem('mealPlanDiet') || '');
   const [deletingPlanId, setDeletingPlanId] = useState(null);
+  const [notice, setNotice] = useState(null);
 
-  const [loading, setLoading] = useState(false);
   const firstLoad = useRef(true);
-  // In-memory cache for AI meal suggestions (per session)
   const aiSuggestCacheRef = useRef({});
-  // Persist selectedDiet to localStorage when changed
-  useEffect(() => {
-    localStorage.setItem('mealPlanDiet', selectedDiet);
-  }, [selectedDiet]);
 
-  // State for weekly view
+  // Current week start (Monday)
   const [currentWeekStart, setCurrentWeekStart] = useState(() => {
     const today = new Date();
-    const dayOfWeek = today.getDay(); // 0 for Sunday, 1 for Monday, etc.
-    const diff = today.getDate() - dayOfWeek + (dayOfWeek === 0 ? -6 : 1); // Adjust to Monday of the current week
+    const dayOfWeek = today.getDay();
+    const diff = today.getDate() - dayOfWeek + (dayOfWeek === 0 ? -6 : 1);
     const monday = new Date(today.setDate(diff));
-    monday.setHours(0, 0, 0, 0); // Set to start of the day
+    monday.setHours(0, 0, 0, 0);
     return monday;
   });
 
@@ -65,17 +94,19 @@ export default function MealPlansPage() {
     return unsub;
   }, []);
 
-  // On user login, restore meal plans and recipes, but do not fetch AI suggestions yet
   useEffect(() => {
-    if (user && firstLoad.current) {
-      fetchPlans(); // Always fetch from API for weekly view
-      fetchRecipes();
-      firstLoad.current = false;
-    }
-    // eslint-disable-next-line
-  }, [user, currentWeekStart]); // Re-fetch when week changes
+    localStorage.setItem('mealPlanDiet', selectedDiet);
+  }, [selectedDiet]);
 
-  // On mount, restore AI suggestions cache from localStorage (only once)
+  useEffect(() => {
+    if (user) {
+      fetchPlans();
+      fetchMealHistory();
+      fetchRecipes();
+      fetchInventory();
+    }
+  }, [user, currentWeekStart]);
+
   useEffect(() => {
     const ls = localStorage.getItem(AI_SUGGEST_LS_KEY);
     if (ls) {
@@ -83,88 +114,103 @@ export default function MealPlansPage() {
         aiSuggestCacheRef.current = JSON.parse(ls);
       } catch {}
     }
-    // No suggestions update here!
-    // eslint-disable-next-line
   }, []);
 
-  // When user/recipes/diet changes, show cached suggestions if available
-  useEffect(() => {
-    if (user && recipes.length > 0) {
-      const inventory = recipes.flatMap(r => r.items?.map(i => i.name) || []);
-      const aiCacheKey = JSON.stringify({ diet: selectedDiet, inventory });
-      if (aiSuggestCacheRef.current[aiCacheKey]) {
-        setSuggestions(aiSuggestCacheRef.current[aiCacheKey]);
-      }
-      // Do not clear suggestions if not found; just leave as is
-    }
-    // eslint-disable-next-line
-  }, [user, recipes, selectedDiet]);
-
-  // Only fetch AI suggestions when user clicks "AI Generate"
-  const fetchSuggestions = async () => {
-    const inventory = recipes.flatMap(r => r.items?.map(i => i.name) || []);
-    const aiCacheKey = JSON.stringify({ diet: selectedDiet, inventory });
-    if (aiSuggestCacheRef.current[aiCacheKey]) {
-      setSuggestions(aiSuggestCacheRef.current[aiCacheKey]);
-      return;
-    }
-    const data = await getMealSuggestions(inventory, selectedDiet);
-    setSuggestions(data);
-    aiSuggestCacheRef.current[aiCacheKey] = data;
-    // Save to localStorage
+  const fetchRecipes = async () => {
     try {
-      localStorage.setItem(AI_SUGGEST_LS_KEY, JSON.stringify(aiSuggestCacheRef.current));
-    } catch {}
+      const res = await getRecipes();
+      setRecipes(res.data || []);
+    } catch (e) {
+      setRecipes([]);
+    }
   };
 
-  const fetchRecipes = async () => {
-    const res = await getRecipes();
-    setRecipes(res.data);
+  const fetchInventory = async () => {
+    try {
+      const res = await getInventory();
+      setInventoryItems(res.data || []);
+    } catch (e) {
+      setInventoryItems([]);
+    }
+  };
+
+  const fetchMealHistory = async () => {
+    try {
+      const res = await getMealHistory();
+      setMealHistory(res.data || []);
+    } catch (e) {
+      console.error('Failed to load meal history', e);
+      setMealHistory([]);
+    }
   };
 
   const fetchPlans = async (showLoading = true) => {
     if (showLoading) setLoading(true);
+    const week = {};
+    daysOfWeek.forEach(day => {
+      week[day] = { Breakfast: null, Lunch: null, Dinner: null };
+    });
+
     try {
       const currentWeekEnd = new Date(currentWeekStart);
-      currentWeekEnd.setDate(currentWeekEnd.getDate() + 6); // End of the week (Sunday)
-      currentWeekEnd.setHours(23, 59, 59, 999); // Set to end of the day
+      currentWeekEnd.setDate(currentWeekEnd.getDate() + 6);
+      currentWeekEnd.setHours(23, 59, 59, 999);
 
       const res = await fetchWeeklyMealPlans(currentWeekStart.toISOString(), currentWeekEnd.toISOString());
-      // Transform to { Monday: { Breakfast: {...}, ... }, ... }
-      const week = {};
-      daysOfWeek.forEach(day => {
-        week[day] = { Breakfast: null, Lunch: null, Dinner: null };
-      });
-
-      res.data.forEach(plan => {
-        const planDate = new Date(plan.date); // Ensure it's a Date object
-        const dayName = daysOfWeek[planDate.getDay() === 0 ? 6 : planDate.getDay() - 1]; // Adjust for Monday start
+      (res.data || []).forEach(plan => {
+        const dateKey = String(plan.date).split('T')[0];
+        const [year, month, day] = dateKey.split('-').map(Number);
+        const planDate = new Date(year, month - 1, day);
+        const dayName = daysOfWeek[planDate.getDay() === 0 ? 6 : planDate.getDay() - 1];
         if (week[dayName] && plan.mealType) {
           week[dayName][plan.mealType] = plan;
         }
       });
-      setPlans(week);
-      mealPlansCache = week; // Update cache
-      // Save to localStorage
-      try {
-        localStorage.setItem(MEAL_PLANS_LS_KEY, JSON.stringify(week));
-      } catch {}
+    } catch (e) {
+      console.error('Failed to load meal plans', e);
     } finally {
+      setPlans(week);
+      mealPlansCache = week;
       if (showLoading) setLoading(false);
     }
   };
 
+  const fetchSuggestions = async () => {
+    setAiLoading(true);
+    const inventory = inventoryItems.map(item => item.name).filter(Boolean);
+    const aiCacheKey = JSON.stringify({ diet: selectedDiet, inventory });
+    if (aiSuggestCacheRef.current[aiCacheKey]) {
+      setSuggestions(aiSuggestCacheRef.current[aiCacheKey]);
+      setAiLoading(false);
+      return;
+    }
+    try {
+      const data = await getMealSuggestions(inventory, selectedDiet);
+      setSuggestions(data || []);
+      aiSuggestCacheRef.current[aiCacheKey] = data;
+      localStorage.setItem(AI_SUGGEST_LS_KEY, JSON.stringify(aiSuggestCacheRef.current));
+    } catch (e) {
+      setSuggestions([]);
+    } finally {
+      setAiLoading(false);
+    }
+  };
+
   const handleAddMeal = (day, mealType, date) => {
+    if (formatLocalDate(date) < formatLocalDate(new Date())) {
+      setNotice({ severity: 'warning', message: 'You cannot add a meal for a past date.' });
+      return;
+    }
     setDialogDay(day);
     setDialogMealType(mealType);
-    setDialogDate(date); // Set the date for the dialog
+    setDialogDate(date);
     setDialogOpen(true);
   };
 
   const handleSaveMeal = async (data) => {
     let name = '';
     let recipeId = null;
-    let recipePayload = null; // To hold the recipe object
+    let recipePayload = null;
 
     if (data.type === 'my') {
       const recipe = recipes.find(r => r.id === data.recipeId);
@@ -179,7 +225,6 @@ export default function MealPlansPage() {
         : null;
       if (aiSuggestion) {
         name = aiSuggestion.recipe_title || aiSuggestion.name || '';
-        // AI suggestions might not have a stable 'id', so we pass the whole object
         recipePayload = aiSuggestion;
       }
     } else if (data.type === 'custom') {
@@ -188,75 +233,107 @@ export default function MealPlansPage() {
 
     if (!name) return;
 
+    const ingredients = String(recipePayload?.ingredients || recipePayload?.ingredient_list || '')
+      .split('|').map(item => item.trim()).filter(Boolean);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const usableInventoryNames = new Set(inventoryItems.filter(item => {
+      if (!item.expiryDate) return true;
+      const expiryDate = new Date(`${String(item.expiryDate).split('T')[0]}T00:00:00`);
+      return isNaN(expiryDate.getTime()) || expiryDate >= today;
+    }).map(item => String(item.name || '').trim().toLowerCase()));
+    const missingIngredients = ingredients.filter(item => !usableInventoryNames.has(item.toLowerCase()));
+
     const payload = {
       day: dialogDay,
       mealType: dialogMealType,
       name,
-      date: dialogDate.toISOString().split('T')[0],
-      recipe: recipePayload, // Add the recipe object to the payload
+      date: dialogDate ? formatLocalDate(dialogDate) : formatLocalDate(new Date()),
+      recipe: recipePayload,
     };
-    if (recipeId) {
-      payload.recipeId = recipeId;
-    }
+    if (recipeId) payload.recipeId = recipeId;
 
-    await addMealPlan(payload);
-    setDialogOpen(false);
-    fetchPlans();
+    try {
+      await addMealPlan(payload);
+      setDialogOpen(false);
+      if (missingIngredients.length > 0) {
+        setNotice({ severity: 'warning', message: `Add these missing ingredients to your inventory: ${missingIngredients.join(', ')}` });
+      }
+      await fetchPlans(false);
+    } catch (err) {
+      console.error('Failed to add meal plan:', err);
+      setNotice({ severity: 'error', message: err.response?.data?.error || 'Failed to add meal plan.' });
+    }
   };
 
   const handleDeleteMeal = async (planId) => {
     setDeletingPlanId(planId);
     await deleteMealPlan(planId);
-    await fetchPlans(false); // Don't show global loading spinner
+    await fetchPlans(false);
     setDeletingPlanId(null);
   };
 
-  // Helper: check if meal is in the past (older than now)
+  const getMissingIngredients = (plan) => {
+    const recipe = plan.recipe || (plan.recipeId && recipes.find(item => item.id === plan.recipeId));
+    const rawIngredients = recipe?.ingredients || recipe?.ingredient_list || recipe?.items;
+    const ingredients = Array.isArray(rawIngredients)
+      ? rawIngredients.map(item => item?.name || item).filter(Boolean)
+      : String(rawIngredients || '').split('|').map(item => item.trim()).filter(Boolean);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const usableNames = new Set(inventoryItems.filter(item => {
+      if (!item.expiryDate) return true;
+      const expiry = new Date(`${String(item.expiryDate).split('T')[0]}T00:00:00`);
+      return isNaN(expiry.getTime()) || expiry >= today;
+    }).map(item => String(item.name || '').trim().toLowerCase()));
+    return ingredients.filter(item => !usableNames.has(String(item).toLowerCase()));
+  };
+
+  const addMissingToShoppingList = (plan) => {
+    const missing = getMissingIngredients(plan);
+    if (!missing.length) {
+      setNotice({ severity: 'info', message: 'All ingredients are already available in your inventory.' });
+      return;
+    }
+    localStorage.setItem('pendingShoppingItems', JSON.stringify(missing.map(name => ({
+      name, quantity: 1, unit: 'pcs', category: 'pantry'
+    }))));
+    navigate('/shopping-lists');
+  };
+
   function isMealPast(mealDate, slot) {
+    if (!mealDate) return false;
     const now = new Date();
-    const mealDateTime = new Date(mealDate);
-    mealDateTime.setHours(0, 0, 0, 0); // Start with date comparison
+    const dateKey = typeof mealDate === 'string'
+      ? mealDate.split('T')[0]
+      : formatLocalDate(mealDate);
+    const [year, month, day] = dateKey.split('-').map(Number);
+    const mealDateTime = new Date(year, month - 1, day);
+    mealDateTime.setHours(0, 0, 0, 0);
 
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
-    // If the meal's date is before today, it's definitely in the past.
-    if (mealDateTime < today) {
-      return true;
-    }
+    if (mealDateTime < today) return true;
 
-    // If the meal's date is today, check the time slot.
     if (mealDateTime.getTime() === today.getTime()) {
       const currentHour = now.getHours();
-      if (slot === 'Breakfast' && currentHour >= 10) return true; // 10 AM
-      if (slot === 'Lunch' && currentHour >= 15) return true; // 3 PM
-      if (slot === 'Dinner' && currentHour >= 22) return true; // 10 PM
+      if (slot === 'Breakfast' && currentHour >= 11) return true;
+      if (slot === 'Lunch' && currentHour >= 15) return true;
+      if (slot === 'Dinner' && currentHour >= 22) return true;
     }
-
     return false;
   }
 
-  // Open "Did you make this meal?" dialog
-  const handleCompleteMeal = (plan) => {
-    setCompleteDialog({ open: true, plan });
-  };
-  
-  const handleCloseCompleteMealDialog = () => {
-    setCompleteDialog({ open: false, plan: null });
-  };
-
-  // After user says "Yes, I made it"
   const handleMadeMeal = (plan) => {
-    // Find ingredients for this plan
     let ingredients = [];
     if (plan.recipeId) {
-      // User's recipe
       const recipe = recipes.find(r => r.id === plan.recipeId);
-      if (recipe && recipe.items) {
-        ingredients = recipe.items.map(i => i.name);
-      }
+      if (recipe && recipe.items) ingredients = recipe.items.map(i => i.name);
+    } else if (plan.recipe?.ingredients || plan.recipe?.ingredient_list) {
+      const ingredientStr = plan.recipe.ingredients || plan.recipe.ingredient_list;
+      ingredients = ingredientStr.split('|').map(i => i.trim()).filter(Boolean);
     } else if (plan.name) {
-      // Try to find in AI suggestions (for AI/CSV recipes)
       const ai = suggestions.find(r => (r.name === plan.name || r.recipe_title === plan.name));
       if (ai && (ai.ingredients || ai.ingredient_list)) {
         const ingredientStr = ai.ingredients || ai.ingredient_list;
@@ -267,33 +344,31 @@ export default function MealPlansPage() {
     setCompleteDialog({ open: false, plan: null });
   };
 
-  // After user says "No, I didn't make it"
-  const handleNotMadeMeal = () => {
-    setCompleteDialog({ open: false, plan: null });
+  const handleNotMadeMeal = async (plan) => {
+    try {
+      await (await import('./api')).updateMealPlan(plan.id, { status: 'not-made' });
+      setCompleteDialog({ open: false, plan: null });
+      setNotice({ severity: 'info', message: `Marked "${plan.name}" as not made. Inventory was not changed.` });
+      await fetchPlans(false);
+    } catch (e) {
+      console.error('Failed to mark meal as not made:', e);
+      setNotice({ severity: 'error', message: e.response?.data?.error || 'Could not update the meal status.' });
+    }
   };
 
-  // After ingredient usage confirm
   const handleConfirmIngredients = async (rows) => {
     try {
-      if (rows && rows.length > 0) {
-        await import('./api').then(api =>
-          api.useIngredients({ ingredients: rows, planId: ingredientDialog.plan?.id })
-        );
-        await fetchPlans(false); // Always refresh plans after ingredient usage
-      }
+      const api = await import('./api');
+      await api.useIngredients({ ingredients: rows || [], planId: ingredientDialog.plan?.id });
+      await fetchPlans(false);
+      await fetchMealHistory();
       setCompletedMeals(cm => ({ ...cm, [ingredientDialog.plan?.id]: true }));
+      fireConfetti({ count: 60, origin: { x: 0.5, y: 0.5 } });
     } catch (e) {
-      alert('Failed to update inventory: ' + (e.message || e));
+      console.error('Failed to update inventory:', e);
+      setNotice({ severity: 'error', message: e.response?.data?.error || 'Some ingredients are missing or expired.' });
     }
     setIngredientDialog({ open: false, plan: null, ingredients: [] });
-  };
-
-  const theme = useTheme();
-
-  // Add this function to handle AI suggestion click
-  const handleAISuggestionClick = (suggestion) => {
-    setSelectedAISuggestion(suggestion);
-    setAIDialogOpen(true);
   };
 
   const goToPreviousWeek = () => {
@@ -308,533 +383,541 @@ export default function MealPlansPage() {
     setCurrentWeekStart(newDate);
   };
 
-  const getWeekRange = () => {
-    const endOfWeek = new Date(currentWeekStart);
-    endOfWeek.setDate(endOfWeek.getDate() + 6);
-    return `${currentWeekStart.toLocaleDateString()} - ${endOfWeek.toLocaleDateString()}`;
+  const goToCurrentWeek = () => {
+    const today = new Date();
+    const dayOfWeek = today.getDay();
+    const diff = today.getDate() - dayOfWeek + (dayOfWeek === 0 ? -6 : 1);
+    const monday = new Date(today.setDate(diff));
+    monday.setHours(0, 0, 0, 0);
+    setCurrentWeekStart(monday);
   };
 
-  if (!user) {
-    let email, password;
-    return (
-      <form onSubmit={async e => {
-        e.preventDefault();
-        await signInWithEmailAndPassword(auth, email.value, password.value);
-      }}>
-        <input placeholder="Email" ref={el => email = el} />
-        <input placeholder="Password" type="password" ref={el => password = el} />
-        <button type="submit">Login</button>
-      </form>
-    );
-  }
+  const endOfWeek = new Date(currentWeekStart);
+  endOfWeek.setDate(endOfWeek.getDate() + 6);
+  const weekRangeText = `${currentWeekStart.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} – ${endOfWeek.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}`;
 
-  // Map suggestions by course for easy access
-  // Map suggestions by slot using partial match (case-insensitive)
-  const suggestionByCourse = {};
-  if (Array.isArray(suggestions)) {
-    ['breakfast', 'lunch', 'dinner'].forEach(slot => {
-      // Find the first suggestion whose course includes the slot word
-      suggestionByCourse[slot] = suggestions.find(s =>
-        typeof s.course === 'string' && s.course.toLowerCase().includes(slot)
-      );
-    });
-  }
-
-  // --- Responsive layout strategy ---
-  // 1. Use a single flex row container for both boxes.
-  // 2. On desktop: Weekly Meal Plan (left), AI Meal Suggestions (right).
-  // 3. On mobile: Stack vertically, both boxes always visible.
-  // 4. No conditional rendering/hiding for either box.
-  // 5. Each box uses full width on mobile, fixed width for AI box on desktop.
+  const todayDateString = formatLocalDate(new Date());
 
   return (
-    <div className="mealplans-page-root" style={{
-      background: theme.colors.background,
-      minHeight: '100vh',
-    }}>
-      <style>{`
-        .mealplans-page-root {
-          background: none !important;
-        }
-        .mealplans-layout {
-          display: flex;
-          flex-direction: row;
-          gap: 32px;
-          padding: 32px;
-          max-width: 1400px;
-          margin: 0 auto;
-          box-sizing: border-box;
-        }
-        @media (max-width: 1024px) {
-          .mealplans-layout {
-            flex-direction: column;
-            padding: 16px;
-            gap: 16px;
-          }
-          .mealplans-layout > .mealplans-main,
-          .mealplans-layout > .mealplans-responsive-ai {
-            width: 100% !important;
-            max-width: 100% !important;
-            min-width: 0 !important;
-            display: block !important;
-          }
-        }
-        @media (max-width: 600px) {
-          .mealplans-layout {
-            flex-direction: column !important;
-            gap: 16px !important;
-          }
-          .mealplans-layout > .mealplans-main,
-          .mealplans-layout > .mealplans-responsive-ai {
-            width: 100% !important;
-            max-width: 100% !important;
-            min-width: 0 !important;
-            display: block !important;
-          }
-        }
-      `}</style>
+    <Box sx={{ maxWidth: 1440, mx: 'auto', px: { xs: 2, md: 4 }, py: 2 }}>
+      {/* Header */}
+      <Box sx={{ display: 'flex', flexDirection: { xs: 'column', md: 'row' }, justifyContent: 'space-between', alignItems: { xs: 'flex-start', md: 'center' }, gap: 2, mb: 4 }}>
+        <Box>
+          <Typography variant="h4" sx={{ fontWeight: 800, color: colors.text, letterSpacing: '-0.02em' }}>
+            Weekly Meal Planner
+          </Typography>
+          <Typography variant="body2" sx={{ color: colors.textSecondary, mt: 0.5 }}>
+            Organize daily nutrition, schedule family meals, and streamline kitchen workflow
+          </Typography>
+        </Box>
+
+        {/* Week Date Navigation Controls */}
+        <Paper
+          elevation={0}
+          sx={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 1,
+            p: 0.8,
+            borderRadius: '14px',
+            bgcolor: colors.cardBg,
+            border: `1px solid ${colors.border}`,
+          }}
+        >
+          <IconButton size="small" onClick={goToPreviousWeek} sx={{ color: colors.text }}>
+            <ChevronLeftIcon />
+          </IconButton>
+          <Button
+            size="small"
+            onClick={goToCurrentWeek}
+            sx={{ fontWeight: 700, color: colors.text, px: 1.5 }}
+          >
+            {weekRangeText}
+          </Button>
+          <IconButton size="small" onClick={goToNextWeek} sx={{ color: colors.text }}>
+            <ChevronRightIcon />
+          </IconButton>
+        </Paper>
+      </Box>
+
+      {/* Main Grid: Weekly Schedule on Left (8-9 cols), AI Sidebar on Right (3-4 cols) */}
+      <Grid container spacing={3.5}>
+        {/* Left Column: 7-Day Interactive Planner */}
+        <Grid item xs={12} lg={8.5}>
+          {loading ? (
+            <Box sx={{ textAlign: 'center', py: 10 }}>
+              <CircularProgress size={40} sx={{ color: colors.primary, mb: 2 }} />
+              <Typography variant="body2" sx={{ color: colors.textSecondary }}>Loading meal schedules...</Typography>
+            </Box>
+          ) : (
+            <Stack spacing={2.5}>
+              {daysOfWeek.map((day, index) => {
+                const dayDate = new Date(currentWeekStart);
+                dayDate.setDate(currentWeekStart.getDate() + index);
+                const dayDateStr = formatLocalDate(dayDate);
+                const isToday = dayDateStr === todayDateString;
+
+                return (
+                  <Paper
+                    key={day}
+                    elevation={0}
+                    sx={{
+                      p: { xs: 2, sm: 2.5 },
+                      borderRadius: '20px',
+                      bgcolor: colors.cardBg,
+                      border: isToday ? `2px solid ${colors.primary}` : `1px solid ${colors.border}`,
+                      boxShadow: isToday ? `0 0 20px ${colors.primary}22` : colors.cardShadow,
+                      transition: 'all 0.2s ease',
+                    }}
+                  >
+                    {/* Day Header */}
+                    <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 2 }}>
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+                        <Typography variant="h6" sx={{ fontWeight: 800, color: colors.text }}>
+                          {day}
+                        </Typography>
+                        <Typography variant="caption" sx={{ color: colors.textSecondary, fontWeight: 600 }}>
+                          {dayDate.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
+                        </Typography>
+                        {isToday && (
+                          <Chip
+                            label="TODAY"
+                            size="small"
+                            sx={{
+                              bgcolor: colors.primary,
+                              color: '#fff',
+                              fontWeight: 800,
+                              fontSize: '0.65rem',
+                              height: 20,
+                            }}
+                          />
+                        )}
+                      </Box>
+                    </Box>
+
+                    {/* Meal Slots Grid: Breakfast, Lunch, Dinner */}
+                    <Grid container spacing={2}>
+                      {mealSlots.map(slot => {
+                        const plan = plans[day]?.[slot.name];
+                        const isPast = plan && isMealPast(plan.date, slot.name);
+                        const isDatePast = dayDateStr < todayDateString;
+                        const isCompleted = plan && completedMeals[plan.id];
+                        const missingCount = plan ? getMissingIngredients(plan).length : 0;
+
+                        return (
+                          <Grid item xs={12} sm={4} key={slot.name} sx={{ display: 'flex' }}>
+                            <Card
+                              className="glow-card-hover"
+                              elevation={0}
+                              sx={{
+                                width: '100%',
+                                height: '100%',
+                                minHeight: 180,
+                                p: 2.2,
+                                borderRadius: '18px',
+                                bgcolor: plan ? colors.paper : colors.cardBg,
+                                border: `1px solid ${plan ? colors.primary + '44' : colors.border}`,
+                                display: 'flex',
+                                flexDirection: 'column',
+                                justifyContent: 'space-between',
+                                position: 'relative',
+                                boxShadow: colors.cardShadow,
+                                transition: 'all 0.2s ease',
+                                '&:hover': {
+                                  borderColor: colors.primary,
+                                },
+                              }}
+                            >
+                              {/* Slot Tag & Icon Header */}
+                              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', height: 28, mb: 1 }}>
+                                <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.8 }}>
+                                  <Typography sx={{ fontSize: 16 }}>{slot.icon}</Typography>
+                                  <Typography variant="caption" sx={{ fontWeight: 800, color: colors.textSecondary, letterSpacing: '0.04em', textTransform: 'uppercase', fontSize: '0.72rem' }}>
+                                    {slot.name}
+                                  </Typography>
+                                </Box>
+                                {plan && (
+                                  <IconButton
+                                    size="small"
+                                    onClick={() => handleDeleteMeal(plan.id)}
+                                    disabled={deletingPlanId === plan.id}
+                                    sx={{
+                                      p: 0.4,
+                                      color: colors.textSecondary,
+                                      '&:hover': { color: colors.error, bgcolor: `${colors.error}15` },
+                                    }}
+                                  >
+                                    <DeleteOutlineIcon sx={{ fontSize: 16 }} />
+                                  </IconButton>
+                                )}
+                              </Box>
+
+                              {/* Planned Meal or Empty State Body */}
+                              {plan ? (
+                                <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'space-between', my: 0.5 }}>
+                                  <Box>
+                                    <Typography
+                                      variant="subtitle2"
+                                      className="line-clamp-2"
+                                      title={plan.name}
+                                      sx={{
+                                        fontWeight: 800,
+                                        color: colors.text,
+                                        lineHeight: 1.3,
+                                        fontSize: '0.95rem',
+                                        minHeight: 38,
+                                        mb: 0.5,
+                                      }}
+                                    >
+                                      {plan.name}
+                                    </Typography>
+                                    <Typography variant="caption" sx={{ color: colors.textSecondary, display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                                      <AccessTimeIcon sx={{ fontSize: 13 }} />
+                                      {plan.time || slot.defaultTime}
+                                    </Typography>
+                                  </Box>
+
+                                  {/* Bottom status / actions inside planned slot */}
+                                  <Box sx={{ mt: 1.5, pt: 1, borderTop: `1px solid ${colors.divider}` }}>
+                                    {missingCount > 0 && (
+                                      <Button
+                                        size="small"
+                                        variant="text"
+                                        onClick={() => addMissingToShoppingList(plan)}
+                                        sx={{
+                                          p: 0,
+                                          mb: 0.5,
+                                          color: colors.warning,
+                                          fontWeight: 700,
+                                          fontSize: '0.7rem',
+                                          textAlign: 'left',
+                                          justifyContent: 'flex-start',
+                                          width: '100%',
+                                        }}
+                                      >
+                                        🛒 Add {missingCount} missing items
+                                      </Button>
+                                    )}
+
+                                    {plan.status === 'not-made' ? (
+                                      <Typography variant="caption" sx={{ color: colors.warning, fontWeight: 700, display: 'block' }}>
+                                        Not made (Inventory untouched)
+                                      </Typography>
+                                    ) : isPast && !isCompleted ? (
+                                      <Button
+                                        size="small"
+                                        variant="outlined"
+                                        fullWidth
+                                        onClick={() => setCompleteDialog({ open: true, plan })}
+                                        sx={{
+                                          py: 0.4,
+                                          fontSize: '0.72rem',
+                                          borderRadius: '8px',
+                                          color: colors.primary,
+                                          borderColor: colors.primary,
+                                          fontWeight: 700,
+                                        }}
+                                      >
+                                        Mark as Made?
+                                      </Button>
+                                    ) : isCompleted ? (
+                                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.6, color: colors.success }}>
+                                        <CheckCircleIcon sx={{ fontSize: 15 }} />
+                                        <Typography variant="caption" sx={{ fontWeight: 800 }}>
+                                          Done & Deducted
+                                        </Typography>
+                                      </Box>
+                                    ) : (
+                                      <Typography variant="caption" sx={{ color: colors.primary, fontWeight: 700 }}>
+                                        Scheduled
+                                      </Typography>
+                                    )}
+                                  </Box>
+                                </Box>
+                              ) : (
+                                <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'space-between', my: 0.5 }}>
+                                  <Box sx={{ my: 'auto', textAlign: 'center', py: 1 }}>
+                                    <Typography variant="body2" sx={{ color: colors.textSecondary, fontStyle: 'italic', fontSize: '0.8rem' }}>
+                                      No meal planned
+                                    </Typography>
+                                  </Box>
+
+                                  <Box sx={{ mt: 'auto', pt: 1, borderTop: `1px solid ${colors.divider}` }}>
+                                    <Button
+                                      size="small"
+                                      variant="outlined"
+                                      fullWidth
+                                      startIcon={<AddIcon sx={{ fontSize: 14 }} />}
+                                      onClick={() => handleAddMeal(day, slot.name, dayDate)}
+                                      disabled={isDatePast}
+                                      sx={{
+                                        py: 0.5,
+                                        borderRadius: '8px',
+                                        fontSize: '0.78rem',
+                                        fontWeight: 700,
+                                        borderColor: colors.border,
+                                        color: isDatePast ? colors.textSecondary : colors.text,
+                                        '&:hover': { borderColor: colors.primary, color: colors.primary, bgcolor: colors.primaryLight },
+                                      }}
+                                    >
+                                      {isDatePast ? 'Date Passed' : `Plan ${slot.name}`}
+                                    </Button>
+                                  </Box>
+                                </Box>
+                              )}
+                            </Card>
+                          </Grid>
+                        );
+                      })}
+                    </Grid>
+                  </Paper>
+                );
+              })}
+            </Stack>
+          )}
+        </Grid>
+
+        {/* Right Column: AI Meal Suggestions Sidebar */}
+        <Grid item xs={12} lg={3.5}>
+          <Paper
+            elevation={0}
+            sx={{
+              p: 3,
+              borderRadius: '24px',
+              bgcolor: colors.cardBg,
+              border: `1px solid ${colors.border}`,
+              boxShadow: colors.cardShadow,
+              position: { lg: 'sticky' },
+              top: { lg: 90 },
+            }}
+          >
+            {/* Header */}
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mb: 2 }}>
+              <Box
+                sx={{
+                  width: 38,
+                  height: 38,
+                  borderRadius: '10px',
+                  bgcolor: colors.accentLight,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  color: colors.accent,
+                }}
+              >
+                <AutoAwesomeIcon fontSize="small" />
+              </Box>
+              <Box>
+                <Typography variant="h6" sx={{ fontWeight: 800, color: colors.text }}>
+                  AI Meal Ideas
+                </Typography>
+                <Typography variant="caption" sx={{ color: colors.textSecondary }}>
+                  Smart weekly recommendations
+                </Typography>
+              </Box>
+            </Box>
+
+            {/* Diet Filter & Generator */}
+            <Stack spacing={1.5} sx={{ mb: 3 }}>
+              <FormControl size="small" fullWidth>
+                <InputLabel>Diet Preference</InputLabel>
+                <Select
+                  value={selectedDiet || 'All Diets'}
+                  label="Diet Preference"
+                  onChange={e => setSelectedDiet(e.target.value === 'All Diets' ? '' : e.target.value)}
+                >
+                  {DIET_OPTIONS.map(d => (
+                    <MenuItem key={d} value={d}>{d}</MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+
+              <Button
+                variant="contained"
+                startIcon={<AutoAwesomeIcon />}
+                onClick={fetchSuggestions}
+                disabled={aiLoading}
+                sx={{
+                  background: colors.gradientAccent,
+                  borderRadius: '10px',
+                  fontWeight: 700,
+                  py: 1,
+                  boxShadow: '0 4px 14px rgba(139, 92, 246, 0.3)',
+                }}
+              >
+                {aiLoading ? 'Thinking...' : 'AI Generate Menu'}
+              </Button>
+            </Stack>
+
+            {/* Suggestions Cards List */}
+            {aiLoading ? (
+              <Box sx={{ textAlign: 'center', py: 4 }}>
+                <CircularProgress size={30} sx={{ color: colors.accent, mb: 1 }} />
+                <Typography variant="body2" sx={{ color: colors.textSecondary }}>Crafting meal plan...</Typography>
+              </Box>
+            ) : suggestions.length === 0 ? (
+              <Box sx={{ textAlign: 'center', py: 3, bgcolor: colors.hover, borderRadius: '14px', border: `1px dashed ${colors.border}` }}>
+                <Typography variant="body2" sx={{ color: colors.textSecondary, mb: 1 }}>
+                  Click "AI Generate Menu" to get suggested meals based on your inventory.
+                </Typography>
+              </Box>
+            ) : (
+              <Stack spacing={1.5} sx={{ maxHeight: 480, overflowY: 'auto', pr: 0.5 }}>
+                {suggestions.slice(0, 6).map((item, idx) => {
+                  const title = item.recipe_title || item.name;
+                  if (!title) return null;
+
+                  return (
+                    <Paper
+                      key={idx}
+                      elevation={0}
+                      onClick={() => setSelectedAISuggestion(item)}
+                      sx={{
+                        p: 1.5,
+                        borderRadius: '14px',
+                        bgcolor: colors.hover,
+                        border: `1px solid ${colors.divider}`,
+                        cursor: 'pointer',
+                        transition: 'all 0.2s',
+                        '&:hover': {
+                          bgcolor: colors.primaryLight,
+                          borderColor: colors.primary,
+                          transform: 'translateY(-2px)',
+                        },
+                      }}
+                    >
+                      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 0.5 }}>
+                        <Typography variant="subtitle2" sx={{ fontWeight: 700, color: colors.text }}>
+                          {title}
+                        </Typography>
+                        {item.course && (
+                          <Chip label={item.course} size="small" sx={{ height: 20, fontSize: '0.65rem', bgcolor: colors.cardBg }} />
+                        )}
+                      </Box>
+                      {item.ingredients_available !== undefined && item.ingredients_total !== undefined && (
+                        <Typography variant="caption" sx={{ color: colors.primary, fontWeight: 700 }}>
+                          ✨ {item.ingredients_available} / {item.ingredients_total} ingredients ready
+                        </Typography>
+                      )}
+                    </Paper>
+                  );
+                })}
+              </Stack>
+            )}
+          </Paper>
+        </Grid>
+      </Grid>
+
+      {/* Completed meal history */}
+      <Paper
+        elevation={0}
+        sx={{
+          mt: 3.5,
+          p: { xs: 2, sm: 3 },
+          borderRadius: '20px',
+          bgcolor: colors.cardBg,
+          border: `1px solid ${colors.border}`,
+          boxShadow: colors.cardShadow,
+        }}
+      >
+        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 2, mb: 2 }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.2 }}>
+            <HistoryIcon sx={{ color: colors.primary }} />
+            <Box>
+              <Typography variant="h6" sx={{ fontWeight: 800, color: colors.text }}>
+                Recently eaten
+              </Typography>
+              <Typography variant="caption" sx={{ color: colors.textSecondary }}>
+                Your completed meals and recipes
+              </Typography>
+            </Box>
+          </Box>
+          <Chip
+            label={`${mealHistory.length} recorded`}
+            size="small"
+            sx={{ color: colors.primary, bgcolor: colors.primaryLight, fontWeight: 700 }}
+          />
+        </Box>
+
+        {mealHistory.length === 0 ? (
+          <Box sx={{ py: 3, textAlign: 'center', bgcolor: colors.hover, borderRadius: '14px', border: `1px dashed ${colors.border}` }}>
+            <Typography variant="body2" sx={{ color: colors.textSecondary }}>
+              Meals you mark as made will appear here for future diet summaries.
+            </Typography>
+          </Box>
+        ) : (
+          <Stack spacing={1}>
+            {mealHistory.map((meal) => {
+              const completedDate = meal.completedAt ? new Date(meal.completedAt) : new Date(meal.date);
+              return (
+                <Box
+                  key={meal.id}
+                  sx={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    gap: 2,
+                    px: 1.5,
+                    py: 1.2,
+                    borderRadius: '12px',
+                    bgcolor: colors.hover,
+                  }}
+                >
+                  <Box sx={{ minWidth: 0 }}>
+                    <Typography variant="body2" sx={{ color: colors.text, fontWeight: 750, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {meal.name || 'Unnamed meal'}
+                    </Typography>
+                    <Typography variant="caption" sx={{ color: colors.textSecondary }}>
+                      {[meal.mealType, meal.date && new Date(`${String(meal.date).split('T')[0]}T00:00:00`).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })].filter(Boolean).join(' · ')}
+                    </Typography>
+                  </Box>
+                  <Typography variant="caption" sx={{ color: colors.success, fontWeight: 700, whiteSpace: 'nowrap' }}>
+                    Eaten {completedDate.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
+                  </Typography>
+                </Box>
+              );
+            })}
+          </Stack>
+        )}
+      </Paper>
+
+      {/* Dialogs */}
+      <Snackbar
+        open={Boolean(notice)}
+        autoHideDuration={6000}
+        onClose={() => setNotice(null)}
+        message={notice?.message}
+      />
+      <AddMealDialog
+        open={dialogOpen}
+        onClose={() => setDialogOpen(false)}
+        onSave={handleSaveMeal}
+        recipes={recipes}
+        aiSuggestions={suggestions.map((s, i) => ({ id: s.id || s.recipe_id || i, name: s.recipe_title || s.name, ...s }))}
+        dayName={dialogDay}
+        mealType={dialogMealType}
+      />
+
       <CompleteMealDialog
         open={completeDialog.open}
-        onClose={handleCloseCompleteMealDialog}
+        onClose={() => setCompleteDialog({ open: false, plan: null })}
         onConfirm={handleMadeMeal}
+        onNotMade={handleNotMadeMeal}
         plan={completeDialog.plan}
       />
+
       <IngredientUsageDialog
         open={ingredientDialog.open}
         onClose={() => setIngredientDialog({ open: false, plan: null, ingredients: [] })}
         ingredients={ingredientDialog.ingredients}
         onConfirm={handleConfirmIngredients}
       />
-      <div className="mealplans-layout">
-        {/* Weekly Meal Plan box (left/main) */}
-        <div className="mealplans-main"
-          style={{
-            flex: '1 1 0',
-            minWidth: 0,
-            maxWidth: '100%',
-            overflowX: 'hidden',
-            display: 'flex',
-            flexDirection: 'column',
-          }}
-        >
-          <h1 style={{ color: theme.colors.text }}>Meal Planning</h1>
-          <div style={{ color: theme.colors.textSecondary, marginBottom: 24 }}>Plan your meals based on available ingredients</div>
-          <div style={{
-            background: theme.colors.paper,
-            borderRadius: 12,
-            padding: 24,
-            boxShadow: '0 2px 8px #0001',
-            border: `1px solid ${theme.colors.divider}`,
-            marginBottom: 0, // Remove marginBottom so AI box stays beside
-            width: '100%',
-            boxSizing: 'border-box'
-          }}>
-            <div style={{ display: 'flex', alignItems: 'center', marginBottom: 16 }}>
-              <h2 style={{ margin: 0, flex: 1, color: theme.colors.text }}>Weekly Meal Plan</h2>
-              <button
-                style={{
-                  background: theme.colors.primary,
-                  color: theme.colors.paper,
-                  border: 'none',
-                  borderRadius: 6,
-                  padding: '6px 16px',
-                  cursor: loading ? 'not-allowed' : 'pointer',
-                  marginLeft: 12
-                }}
-                onClick={() => fetchPlans(true)}
-                disabled={loading}
-              >
-                {loading ? 'Refreshing...' : 'Refresh'}
-              </button>
-            </div>
 
-            {/* Date Navigation */}
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
-              <button onClick={goToPreviousWeek} style={{ background: 'none', border: 'none', fontSize: 24, cursor: 'pointer', color: theme.colors.text }}>&lt;</button>
-              <h3 style={{ margin: 0, color: theme.colors.text }}>{getWeekRange()}</h3>
-              <button onClick={goToNextWeek} style={{ background: 'none', border: 'none', fontSize: 24, cursor: 'pointer', color: theme.colors.text }}>&gt;</button>
-            </div>
-
-            {loading ? (
-              <div style={{ color: theme.colors.textSecondary, textAlign: 'center', margin: '48px 0', fontSize: 18 }}>Loading...</div>
-            ) : (
-              <>
-                {daysOfWeek.map((day, index) => {
-                  const dayDate = new Date(currentWeekStart);
-                  dayDate.setDate(currentWeekStart.getDate() + index);
-                  return (
-                    <div key={day} style={{ marginBottom: 16 }}>
-                      <div style={{ fontWeight: 600, fontSize: 18, marginBottom: 8, color: theme.colors.text }}>
-                        {day} - {dayDate.toLocaleDateString()}
-                      </div>
-                      <div style={{ display: 'flex', gap: 16 }}>
-                        {mealSlots.map(slot => {
-                          const plan = plans[day]?.[slot];
-                          const isPast = plan && isMealPast(plan.date, slot);
-                          const isCompleted = plan && completedMeals[plan.id];
-                          return (
-                            <div key={slot} style={{
-                              flex: 1,
-                              border: `1px solid ${theme.colors.divider}`,
-                              borderRadius: 8,
-                              padding: 16,
-                              minHeight: 80,
-                              background: plan ? theme.colors.cardBg : theme.colors.hover,
-                              display: 'flex',
-                              flexDirection: 'column',
-                              alignItems: 'flex-start',
-                              justifyContent: 'center',
-                              position: 'relative',
-                              color: theme.colors.text
-                            }}>
-                              <div style={{ fontWeight: 500, color: theme.colors.textSecondary, marginBottom: 4 }}>{slot}</div>
-                              {plan ? (
-                                <>
-                                  <div style={{ fontWeight: 600, color: theme.colors.text }}>{plan.name}</div>
-                                  <div style={{ fontSize: 12, color: theme.colors.textSecondary }}>{plan.time || (slot === 'Breakfast' ? '8:00 AM' : slot === 'Lunch' ? '12:30 PM' : '7:00 PM')}</div>
-                                  <button
-                                    style={{
-                                      position: 'absolute', top: 8, right: 8, background: 'none', border: 'none', color: theme.colors.error, cursor: deletingPlanId === plan.id ? 'not-allowed' : 'pointer'
-                                    }}
-                                    onClick={() => handleDeleteMeal(plan.id)}
-                                    disabled={deletingPlanId === plan.id}
-                                    title="Delete"
-                                  >
-                                    {deletingPlanId === plan.id ? (
-                                      <span style={{ fontSize: 14 }}>Deleting...</span>
-                                    ) : (
-                                      '✕'
-                                    )}
-                                  </button>
-                                  {/* Show completed status or "Completed" button if in the past */}
-                                  {isPast && !isCompleted && (
-                                    <button
-                                      style={{
-                                        marginTop: 8,
-                                        background: theme.colors.primary,
-                                        color: theme.colors.paper,
-                                        border: 'none',
-                                        borderRadius: 6,
-                                        padding: '4px 12px',
-                                        cursor: 'pointer',
-                                        fontSize: 14
-                                      }}
-                                      onClick={() => handleCompleteMeal(plan)}
-                                    >Completed?</button>
-                                  )}
-                                  {isCompleted && (
-                                    <div style={{ marginTop: 8, color: theme.colors.primary, fontWeight: 500 }}>✔ Marked as made & inventory updated</div>
-                                  )}
-                                </>
-                              ) : (
-                                <>
-                                  <button
-                                    style={{
-                                      background: theme.colors.hover,
-                                      border: `1px dashed ${theme.colors.divider}`,
-                                      borderRadius: 6,
-                                      padding: '6px 12px',
-                                      color: theme.colors.textSecondary,
-                                      cursor: 'pointer'
-                                    }}
-                                    onClick={() => handleAddMeal(day, slot, dayDate)} // Pass dayDate
-                                  >+ Add {slot.toLowerCase()}</button>
-                                  <AddMealDialog
-                                    open={dialogOpen}
-                                    onClose={() => setDialogOpen(false)}
-                                    onSave={handleSaveMeal}
-                                    recipes={recipes}
-                                    aiSuggestions={(() => {
-                                      if (!Array.isArray(suggestions)) return [];
-                                      // Show all unique AI suggestions for the week (all 3 courses)
-                                      const seen = new Set();
-                                      const arr = suggestions.filter(s => {
-                                        const key = (s.recipe_title || s.name || '') + (s.course || '');
-                                        if (seen.has(key)) return false;
-                                        seen.add(key);
-                                        return true;
-                                      });
-                                      return arr.map((s, idx) => ({
-                                        id: s.id || s.recipe_id || idx, // fallback to idx if no id
-                                        name: s.recipe_title || s.name || '',
-                                        ...s
-                                      }));
-                                    })()}
-                                  />
-                                </>
-                              )}
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  );
-                })}
-              </>
-            )}
-          </div>
-        </div>
-        {/* AI Meal Suggestions box (right/sidebar) */}
-        <div
-          className="mealplans-responsive-ai"
-          style={{
-            flex: '0 0 380px',
-            background: theme.colors.paper,
-            borderRadius: 12,
-            padding: 24,
-            boxShadow: '0 2px 8px #0001',
-            width: '380px',
-            margin: 0,
-            overflow: 'hidden',
-            position: 'sticky',
-            top: 32,
-            alignSelf: 'flex-start',
-            boxSizing: 'border-box',
-            height: 'max-content',
-            maxHeight: 'calc(100vh - 64px)',
-            overflowY: 'auto',
-            border: `1px solid ${theme.colors.divider}`,
-            color: theme.colors.text
-          }}
-        >
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              marginBottom: 16,
-              gap: 12,
-              flexWrap: 'wrap',
-            }}
-          >
-            <h2 style={{ margin: 0, flex: 1, fontSize: 22, color: theme.colors.text }}>AI Meal Suggestions</h2>
-            <select
-              value={selectedDiet}
-              onChange={e => setSelectedDiet(e.target.value)}
-              style={{
-                padding: '6px 8px',
-                borderRadius: 6,
-                border: `1px solid ${theme.colors.divider}`,
-                color: theme.colors.text,
-                background: theme.colors.hover,
-                minWidth: 120,
-                fontSize: 15,
-              }}
-              title="Filter by diet"
-            >
-              <option value="">All Diets</option>
-              <option value="Vegetarian">Vegetarian</option>
-              <option value="High Protein Vegetarian">High Protein Vegetarian</option>
-              <option value="Non Vegeterian">Non Vegeterian</option>
-              <option value="No Onion No Garlic (Sattvic)">No Onion No Garlic (Sattvic)</option>
-              <option value="High Protein Non Vegetarian">High Protein Non Vegetarian</option>
-              <option value="Diabetic Friendly">Diabetic Friendly</option>
-              <option value="Eggetarian">Eggetarian</option>
-              <option value="Vegan">Vegan</option>
-              <option value="Gluten Free">Gluten Free</option>
-              <option value="Sugar Free Diet">Sugar Free Diet</option>
-            </select>
-            <button
-              style={{
-                background: theme.colors.primary,
-                color: theme.colors.paper,
-                border: 'none',
-                borderRadius: 6,
-                padding: '6px 16px',
-                cursor: 'pointer',
-                fontSize: 15,
-                minWidth: 100,
-              }}
-              onClick={fetchSuggestions}
-            >
-              AI Generate
-            </button>
-          </div>
-          {/* Show only recipe names for Breakfast, Lunch, Dinner */}
-          {['Breakfast', 'Lunch', 'Dinner'].map(slot => {
-            const s = suggestionByCourse[slot.toLowerCase()];
-            // Icon path for each meal slot
-            const iconMap = {
-              breakfast: '/assets/icons/breakfast.png',
-              lunch: '/assets/icons/lunch.png',
-              dinner: '/assets/icons/dinner.png',
-            };
-            const iconSrc = iconMap[slot.toLowerCase()];
-            return (
-              <div
-                key={slot}
-                style={{
-                  border: `1px solid ${theme.colors.divider}`,
-                  borderRadius: 8,
-                  padding: 16,
-                  marginBottom: 16,
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 16,
-                  cursor: s ? 'pointer' : 'not-allowed',
-                  background: theme.colors.hover,
-                  opacity: s ? 1 : 0.5,
-                  minHeight: 72,
-                  width: '100%',
-                  boxSizing: 'border-box',
-                  flexWrap: 'wrap',
-                  color: theme.colors.text
-                }}
-                onClick={() => s && handleAISuggestionClick(s)}
-              >
-                {/* Icon on the left */}
-                <img
-                  src={iconSrc}
-                  alt={slot + ' icon'}
-                  style={{
-                    width: 44,
-                    height: 44,
-                    objectFit: 'contain',
-                    marginRight: 8,
-                    flexShrink: 0,
-                    filter: s ? 'none' : 'grayscale(1)',
-                  }}
-                />
-                {/* Recipe info */}
-                <div
-                  style={{
-                    flex: 1,
-                    display: 'flex',
-                    flexDirection: 'column',
-                    justifyContent: 'center',
-                    minWidth: 0,
-                  }}
-                >
-                  <div style={{ fontWeight: 600, color: theme.colors.text, fontSize: 17, marginBottom: 2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                    {s ? s.recipe_title : 'No suggestion'}
-                  </div>
-                  <div style={{ fontSize: 13, color: theme.colors.textSecondary, fontWeight: 500, marginBottom: 2, minHeight: 16 }}>
-                    {s && s.course ? s.course : ''}
-                  </div>
-                  {/* Ingredient availability */}
-                  {s && (
-                    <div style={{ fontSize: 13, color: theme.colors.primary, fontWeight: 600 }}>
-                      {typeof s.ingredients_available === 'number' && typeof s.ingredients_total === 'number'
-                        ? `${s.ingredients_available} / ${s.ingredients_total} ingredients`
-                        : ''}
-                    </div>
-                  )}
-                </div>
-              </div>
-            );
-          })}
-        {/* AI Suggestion Dialog */}
-        {aiDialogOpen && selectedAISuggestion && (
-          <div style={{
-            position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh',
-            background: '#0008', zIndex: 2000, display: 'flex', alignItems: 'center', justifyContent: 'center',
-          }}>
-            <div
-              style={{
-                background: theme.colors.paper,
-                borderRadius: 12,
-                padding: 0,
-                minWidth: 340,
-                maxWidth: 540,
-                boxShadow: '0 2px 12px #0002',
-                maxHeight: '90vh',
-                display: 'flex',
-                flexDirection: 'column',
-                overflow: 'hidden',
-                color: theme.colors.text
-              }}
-              tabIndex={0}
-              onClick={e => e.stopPropagation()}
-            >
-              <div style={{
-                padding: 32,
-                overflowY: 'auto',
-                maxHeight: 'calc(90vh - 60px)',
-                minHeight: 0,
-                flex: 1,
-                boxSizing: 'border-box',
-              }}>
-                <div style={{ fontWeight: 700, fontSize: 22, marginBottom: 12 }}>{selectedAISuggestion.recipe_title}</div>
-                <div style={{ color: theme.colors.textSecondary, fontSize: 15, marginBottom: 8 }}>
-                  {selectedAISuggestion.course}
-                  {selectedAISuggestion.diet ? <span> &middot; {selectedAISuggestion.diet}</span> : null}
-                  {selectedAISuggestion.prep_time ? <span> &middot; {selectedAISuggestion.prep_time}</span> : null}
-                </div>
-                {selectedAISuggestion.recipe_image && (
-                  <div style={{ textAlign: 'center', marginBottom: 16 }}>
-                    <img
-                      src={selectedAISuggestion.recipe_image}
-                      alt={selectedAISuggestion.recipe_title}
-                      style={{ width: '100%', maxHeight: 400, objectFit: 'cover', borderRadius: 8, border: `1px solid ${theme.colors.divider}` }}
-                      onError={e => { e.target.style.display = 'none'; }}
-                    />
-                  </div>
-                )}
-                {selectedAISuggestion.description && (
-                  <div style={{ color: theme.colors.textSecondary, fontSize: 14, marginBottom: 12 }}>{selectedAISuggestion.description}</div>
-                )}
-                <div style={{ fontWeight: 600, marginBottom: 8 }}>Ingredients:</div>
-                {selectedAISuggestion.ingredients ? (
-                  <ul style={{ margin: 0, padding: 0, listStyle: 'none' }}>
-                    {selectedAISuggestion.ingredients.split('|').filter(i => i.trim()).map((ing, idx) => {
-                      const isAvailable = selectedAISuggestion.matched_ingredients?.includes(ing.toLowerCase());
-                      const isMissing = selectedAISuggestion.missing_ingredients?.includes(ing.toLowerCase());
-                      return (
-                        <li key={idx} style={{
-                          marginBottom: 4,
-                          color: isAvailable ? theme.colors.primary : isMissing ? theme.colors.error : theme.colors.text,
-                          fontWeight: isAvailable ? 600 : isMissing ? 600 : 400
-                        }}>
-                          {ing}
-                          {isAvailable && <span style={{ marginLeft: 8, fontSize: 12, color: theme.colors.primary }}>(In Inventory)</span>}
-                          {isMissing && <span style={{ marginLeft: 8, fontSize: 12, color: theme.colors.error }}>(Missing)</span>}
-                        </li>
-                      );
-                    })}
-                  </ul>
-                ) : (
-                  <div style={{ color: theme.colors.textSecondary, fontSize: 14, marginBottom: 8 }}>No ingredients found for this recipe.</div>
-                )}
-                {selectedAISuggestion.instructions && (
-                  <div style={{ marginTop: 12 }}>
-                    <div style={{ fontWeight: 600, marginBottom: 6 }}>Instructions:</div>
-                    <ol style={{ margin: 0, paddingLeft: 18 }}>
-                      {selectedAISuggestion.instructions.split('|').map((step, idx) => (
-                        <li key={idx} style={{ marginBottom: 4 }}>{step.trim()}</li>
-                      ))}
-                      </ol>
-                  </div>
-                )}
-                <div style={{ marginTop: 10, fontSize: 14, color: theme.colors.text }}>
-                  <b>Ingredients available:</b> {selectedAISuggestion.ingredients_available} / {selectedAISuggestion.ingredients_total}
-                </div>
-                {selectedAISuggestion.url && (
-                  <div style={{ marginTop: 10 }}>
-                    <a href={selectedAISuggestion.url} target="_blank" rel="noopener noreferrer" style={{ color: theme.colors.primary, textDecoration: 'underline' }}>
-                      View Full Recipe
-                    </a>
-                  </div>
-                  
-                )}
-              </div>
-              <div style={{
-                padding: '16px 32px',
-                borderTop: `1px solid ${theme.colors.divider}`,
-                background: theme.colors.hover,
-                textAlign: 'right',
-              }}>
-                <button
-                  style={{ background: theme.colors.hover, color: theme.colors.text, border: 'none', borderRadius: 6, padding: '8px 24px', fontSize: 16, cursor: 'pointer' }}
-                  onClick={() => { setAIDialogOpen(false); setSelectedAISuggestion(null); }}
-                >Close</button>
-              </div>
-            </div>
-          </div>
-        )}
-          {!Array.isArray(suggestions) && suggestions && suggestions.error && (
-            <div style={{ color: theme.colors.error }}>{suggestions.error}</div>
-          )}
-          </div>
-        </div>
-        </div>
-        );
+      <AIRecipeDetailsDialog
+        open={Boolean(selectedAISuggestion)}
+        onClose={() => setSelectedAISuggestion(null)}
+        recipe={selectedAISuggestion}
+      />
+    </Box>
+  );
 }

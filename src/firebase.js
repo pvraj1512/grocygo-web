@@ -1,19 +1,35 @@
 // Firebase web config
 import { initializeApp } from 'firebase/app';
 import { getAuth } from 'firebase/auth';
+import { firebaseConfig, isConfigValid } from './config';
 
-const firebaseConfig = {
-  apiKey: process.env.REACT_APP_FIREBASE_API_KEY,
-  authDomain: process.env.REACT_APP_FIREBASE_AUTH_DOMAIN,
-  projectId: process.env.REACT_APP_FIREBASE_PROJECT_ID,
-  storageBucket: process.env.REACT_APP_FIREBASE_STORAGE_BUCKET,
-  messagingSenderId: process.env.REACT_APP_FIREBASE_MESSAGING_SENDER_ID,
-  appId: process.env.REACT_APP_FIREBASE_APP_ID,
-  measurementId: process.env.REACT_APP_FIREBASE_MEASUREMENT_ID
-};
+console.log('🔍 Initializing Firebase...');
+console.log('Config Valid:', isConfigValid());
+console.log('Full Config:', {
+  apiKey: firebaseConfig.apiKey ? '***REDACTED***' : 'MISSING',
+  authDomain: firebaseConfig.authDomain || 'MISSING',
+  projectId: firebaseConfig.projectId || 'MISSING',
+  appId: firebaseConfig.appId ? '***REDACTED***' : 'MISSING'
+});
 
-const app = initializeApp(firebaseConfig);
-export const auth = getAuth(app);
+if (!isConfigValid()) {
+  console.error('❌ Firebase configuration is invalid or incomplete!');
+  throw new Error('Firebase config is not valid');
+}
+
+let app, auth;
+try {
+  app = initializeApp(firebaseConfig);
+  console.log('✅ Firebase App initialized successfully');
+  
+  auth = getAuth(app);
+  console.log('✅ Firebase Auth initialized successfully');
+} catch (error) {
+  console.error('❌ Failed to initialize Firebase:', error);
+  throw error;
+}
+
+export { auth };
 
 // Token management utilities
 let tokenExpiryTime = 0;

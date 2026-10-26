@@ -1,18 +1,26 @@
 import React, { useState, useEffect } from 'react';
+import {
+  Dialog, DialogTitle, DialogContent, DialogActions, Button,
+  Typography, Box, TextField, Select, MenuItem, FormControl,
+  Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Paper
+} from '@mui/material';
+import InventoryIcon from '@mui/icons-material/Inventory2Outlined';
+import { useTheme } from './ThemeContext';
 
 const UNIT_OPTIONS = [
-  'pieces', 'kg', 'bag', 'packet', 'box', 'containers', 'Ibs', 'loaf'
+  'pieces', 'kg', 'g', 'bag', 'packet', 'box', 'containers', 'lbs', 'loaf', 'tbsp', 'tsp', 'cup'
 ];
 
 export default function IngredientUsageDialog({ open, onClose, ingredients = [], onConfirm }) {
   const [rows, setRows] = useState([]);
+  const { colors } = useTheme();
 
   useEffect(() => {
     if (open) {
       setRows(
         (ingredients || []).map(name => ({
           name,
-          quantity: '',
+          quantity: '1',
           unit: 'pieces'
         }))
       );
@@ -35,98 +43,102 @@ export default function IngredientUsageDialog({ open, onClose, ingredients = [],
   };
 
   return (
-    <div style={{
-      position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh',
-      background: '#0008', zIndex: 1200, display: 'flex', alignItems: 'center', justifyContent: 'center'
-    }}>
-      <form
-        onSubmit={handleSubmit}
-        style={{
-          background: '#fff',
-          borderRadius: 12,
-          padding: 32,
-          minWidth: 380,
-          maxWidth: 520,
-          boxShadow: '0 2px 12px #0002'
-        }}
-        onClick={e => e.stopPropagation()}
-      >
-        <div style={{ fontWeight: 700, fontSize: 20, marginBottom: 18 }}>Ingredient Usage</div>
-        <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: 18 }}>
-          <thead>
-            <tr>
-              <th style={{ textAlign: 'left', padding: 6, fontWeight: 600 }}>Ingredient</th>
-              <th style={{ textAlign: 'left', padding: 6, fontWeight: 600 }}>Quantity</th>
-              <th style={{ textAlign: 'left', padding: 6, fontWeight: 600 }}>Unit</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((row, idx) => (
-              <tr key={row.name}>
-                <td style={{ padding: 6 }}>{row.name}</td>
-                <td style={{ padding: 6 }}>
-                  <input
-                    type="number"
-                    min="0"
-                    step="any"
-                    value={row.quantity}
-                    onChange={e => handleChange(idx, 'quantity', e.target.value)}
-                    style={{
-                      width: 80,
-                      padding: '4px 6px',
-                      borderRadius: 4,
-                      border: '1px solid #bbb'
-                    }}
-                    required
-                  />
-                </td>
-                <td style={{ padding: 6 }}>
-                  <select
-                    value={row.unit}
-                    onChange={e => handleChange(idx, 'unit', e.target.value)}
-                    style={{
-                      padding: '4px 8px',
-                      borderRadius: 4,
-                      border: '1px solid #bbb'
-                    }}
-                  >
-                    {UNIT_OPTIONS.map(opt => (
-                      <option key={opt} value={opt}>{opt}</option>
-                    ))}
-                  </select>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 12 }}>
-          <button
-            type="button"
-            style={{
-              background: '#eee',
-              color: '#333',
-              border: 'none',
-              borderRadius: 6,
-              padding: '8px 24px',
-              fontSize: 16,
-              cursor: 'pointer'
-            }}
-            onClick={onClose}
-          >Cancel</button>
-          <button
+    <Dialog
+      open={open}
+      onClose={onClose}
+      maxWidth="sm"
+      fullWidth
+      PaperProps={{
+        sx: {
+          bgcolor: colors.paper,
+          p: 1,
+          borderRadius: '24px',
+          boxShadow: colors.cardShadow,
+        },
+      }}
+    >
+      <DialogTitle sx={{ pb: 1 }}>
+        <Typography variant="h5" sx={{ fontWeight: 800, fontFamily: "'Plus Jakarta Sans', sans-serif", color: colors.text }}>
+          Confirm Ingredient Usage
+        </Typography>
+        <Typography variant="caption" sx={{ color: colors.textSecondary }}>
+          Adjust quantities used so your kitchen inventory is accurately updated
+        </Typography>
+      </DialogTitle>
+
+      <Box component="form" onSubmit={handleSubmit}>
+        <DialogContent sx={{ pt: 1 }}>
+          {rows.length === 0 ? (
+            <Box sx={{ p: 3, textAlign: 'center', bgcolor: colors.hover, borderRadius: '12px' }}>
+              <Typography variant="body2" sx={{ color: colors.textSecondary }}>
+                No ingredient details found for this meal. Click Confirm to mark as completed.
+              </Typography>
+            </Box>
+          ) : (
+            <TableContainer component={Paper} elevation={0} sx={{ bgcolor: colors.cardBg, border: `1px solid ${colors.border}`, borderRadius: '14px' }}>
+              <Table size="small">
+                <TableHead>
+                  <TableRow sx={{ bgcolor: colors.hover }}>
+                    <TableCell sx={{ color: colors.textSecondary, fontWeight: 700, fontSize: '0.8rem' }}>Ingredient</TableCell>
+                    <TableCell sx={{ color: colors.textSecondary, fontWeight: 700, fontSize: '0.8rem', width: 110 }}>Quantity</TableCell>
+                    <TableCell sx={{ color: colors.textSecondary, fontWeight: 700, fontSize: '0.8rem', width: 120 }}>Unit</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {rows.map((row, idx) => (
+                    <TableRow key={idx} sx={{ borderBottom: `1px solid ${colors.divider}` }}>
+                      <TableCell sx={{ color: colors.text, fontWeight: 600 }}>
+                        {row.name}
+                      </TableCell>
+                      <TableCell>
+                        <TextField
+                          size="small"
+                          type="number"
+                          inputProps={{ min: 0, step: 'any' }}
+                          value={row.quantity}
+                          onChange={e => handleChange(idx, 'quantity', e.target.value)}
+                          required
+                          sx={{ width: 90 }}
+                        />
+                      </TableCell>
+                      <TableCell>
+                        <FormControl size="small" sx={{ width: 110 }}>
+                          <Select
+                            value={row.unit}
+                            onChange={e => handleChange(idx, 'unit', e.target.value)}
+                          >
+                            {UNIT_OPTIONS.map(opt => (
+                              <MenuItem key={opt} value={opt}>{opt}</MenuItem>
+                            ))}
+                          </Select>
+                        </FormControl>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </TableContainer>
+          )}
+        </DialogContent>
+
+        <DialogActions sx={{ px: 3, pb: 3 }}>
+          <Button onClick={onClose} sx={{ color: colors.textSecondary }}>
+            Cancel
+          </Button>
+          <Button
             type="submit"
-            style={{
-              background: '#19c37d',
-              color: '#fff',
-              border: 'none',
-              borderRadius: 6,
-              padding: '8px 24px',
-              fontSize: 16,
-              cursor: 'pointer'
+            variant="contained"
+            sx={{
+              background: colors.gradientPrimary,
+              borderRadius: '10px',
+              px: 3,
+              fontWeight: 700,
             }}
-          >Confirm</button>
-        </div>
-      </form>
-    </div>
+          >
+            Update Inventory & Complete
+          </Button>
+        </DialogActions>
+      </Box>
+    </Dialog>
   );
 }
