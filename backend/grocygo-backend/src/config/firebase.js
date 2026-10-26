@@ -28,6 +28,7 @@ if (!serviceAccount) {
 }
 
 const appOptions = {
+  projectId: serviceAccount?.project_id || process.env.FIREBASE_PROJECT_ID || "grocygo-eeb8b",
   storageBucket: process.env.FIREBASE_STORAGE_BUCKET || "grocygo-eeb8b.firebasestorage.app",
 };
 
